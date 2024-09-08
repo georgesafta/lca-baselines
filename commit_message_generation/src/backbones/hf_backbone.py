@@ -23,6 +23,11 @@ class HuggingFaceBackbone(CMGBackbone):
         "HuggingFaceH4/starchat-alpha": "starchat",
         "Salesforce/instructcodet5p-16b": "alpaca",
     }
+    TORCH_DTYPE: Dict[str, torch.dtype] = {
+        "f16": torch.float16,
+        "bf16": torch.bfloat16,
+        "f32": torch.float32,
+    }
     name: str = "huggingface"
 
     def __init__(
@@ -41,6 +46,8 @@ class HuggingFaceBackbone(CMGBackbone):
         self._is_encoder_decoder = is_encoder_decoder
         self._name_or_path = model_name
 
+        if model_kwargs.torch_dtype in self.TORCH_DTYPE:
+            model_kwargs.torch_dtype = self.TORCH_DTYPE[model_kwargs.torch_dtype]
         if self._is_encoder_decoder:
             self._model = AutoModelForSeq2SeqLM.from_pretrained(self._name_or_path, **model_kwargs)  # type: ignore[arg-type]
         else:
