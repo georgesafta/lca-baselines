@@ -110,14 +110,15 @@ class EvalPipeline:
         do_generation = self.config.do_generation
         seed = self.config.seed
         # Run Zero context scenario
-        wb_run = wandb.init(project=self.project_name, group=f"zero_context", name=f"zero_context")
         results = list()
         result_0 = self.run_zero_context()
         results.append(result_0)
-        wb_run.log(results[-1])
+        if self.config.use_wandb:
+            wb_run = wandb.init(project=self.project_name, group=f"zero_context", name=f"zero_context")
+            wb_run.log(results[-1])
+            wb_run.finish()
         print(results[-1])
         print()
-        wb_run.finish()
 
         # Initialization of config for LineGenerator
         self.generator_config = GeneratorConfig(
@@ -136,7 +137,7 @@ class EvalPipeline:
         for composer in self.composers:
             if composer == 'none':
                 continue
-            results = self.run_composer(composer, results)
+            results.extend(self.run_composer(composer, result_0))
 
         inference_out_dir_path = Path(self.inference_args.out_dir)
         if inference_out_dir_path.exists():
@@ -147,16 +148,18 @@ class EvalPipeline:
         print(f">>Completion Results are in {os.path.join(self.out_dir, 'completion_results.json')}")
 
         if do_generation:
-            wb_run = wandb.init(
-                project=self.config.wandb_project_name_generation,
-                name='_'.join([self.generator_config.model, 'composer', self.generator_config.composer, self.dataset_name]),
-                config=asdict(self.generator_config)
-            )
             gen_scores, gen_results, em_difference, line_counts = evaluate_generation(self.generator_config)
 
-            wb_run.log(gen_scores | {'EM_difference': em_difference, 'Line Counts': line_counts,
-                                     "dataset": self.dataset_name, "model": self.inference_args.model})
-            wb_run.finish()
+            if self.config.use_wandb:
+                wb_run = wandb.init(
+                    project=self.config.wandb_project_name_generation,
+                    name='_'.join([self.generator_config.model, 'composer', self.generator_config.composer, self.dataset_name]),
+                    config=asdict(self.generator_config)
+                )
+                wb_run.log(gen_scores | {'EM_difference': em_difference, 'Line Counts': line_counts,
+                                         "dataset": self.dataset_name, "model": self.inference_args.model})
+                wb_run.finish()
+
             with open(os.path.join(self.out_dir, 'generation_scores.json'), 'w') as f:
                 json.dump(gen_results, f, indent=4)
             print(f">>Generation Results are in {os.path.join(self.out_dir, 'generation_scores.json')}")
@@ -186,19 +189,17 @@ class EvalPipeline:
         return {"perplexity": mean_ppl, "context": 0, "composer": "zero", "dataset": self.dataset_name,
                 "model": self.inference_args.model} | lost_tokens
 
-    def run_composer(self, composer, results):
-        wb_run = wandb.init(project=self.project_name, group=f"{composer} composer", name=f"{composer} composer")
+    def run_composer(self, composer, results_with_zero_context):
         self.preprocess_args.composers = composer
         print(f'>>Preprocessing for {composer} composer...')
         prepared_dataset_path = preprocess(self.preprocess_args, self.config.composers_config)
         self.inference_args.input_data_path = prepared_dataset_path
 
-        wb_run.log(results[0])
-
         first_step_context_size = 256
         final_step_context_size = self.inference_args.seq_max_len * 3 // 4
         step_factor = (final_step_context_size / first_step_context_size) ** (1/2)  # Three steps are expected
         self.inference_args.context_max = first_step_context_size
+        results = list()
         while self.inference_args.context_max <= self.inference_args.seq_max_len:
             torch.cuda.empty_cache()
             self.eval_args.out_dir = os.path.join(self.out_dir,
@@ -214,7 +215,6 @@ class EvalPipeline:
                             "composer": composer, "dataset": self.dataset_name,
                             "model": self.inference_args.model} | lost_tokens)
             print(results[-1])
-            wb_run.log(results[-1])
 
             # Updating config for LineGenerator if got better score
             if results[-1]["perplexity"] < self.generator_config.best_perplexity:
@@ -233,7 +233,13 @@ class EvalPipeline:
 
             self.inference_args.context_max = int(self.inference_args.context_max*step_factor) + 1
         print()
-        wb_run.finish()
+
+        if self.config.use_wandb:
+            wb_run = wandb.init(project=self.project_name, group=f"{composer} composer", name=f"{composer} composer")
+            wb_run.log(results_with_zero_context)
+            for result in results:
+                wb_run.log(result)
+            wb_run.finish()
 
         return results
 

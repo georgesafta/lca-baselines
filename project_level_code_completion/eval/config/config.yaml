@@ -9,6 +9,8 @@ artifacts_dir: "data/code_generation/artifacts/"
 
 wandb_project_name: 'LCA_context_composer_choice'
 
+use_wandb: True
+
 do_generation: True
 seed: 42
 wandb_project_name_generation: 'LCA_project_code_completion'
