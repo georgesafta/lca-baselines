@@ -33,4 +33,17 @@ MODEL_REGISTRY = {
 
     'deepseek-coder-1b': ModelMetainfo(builder=HFModelBuilder, checkpoint="deepseek-ai/deepseek-coder-1.3b-base"),
     'deepseek-coder-7b': ModelMetainfo(builder=HFModelBuilder, checkpoint="deepseek-ai/deepseek-coder-6.7b-base"),
+
+    'granite-3b-code-base': ModelMetainfo(builder=HFModelBuilder, checkpoint="ibm-granite/granite-3b-code-base"),
+    'granite-3b-code-base-128k': ModelMetainfo(builder=HFModelBuilder, checkpoint="ibm-granite/granite-3b-code-base-128k"),
+    'granite-3b-code-instruct': ModelMetainfo(builder=HFModelBuilder, checkpoint="ibm-granite/granite-3b-code-instruct"),
+    'granite-3b-code-instruct-128k': ModelMetainfo(builder=HFModelBuilder, checkpoint="ibm-granite/granite-3b-code-instruct-128k"),
+    'granite-8b-code-base': ModelMetainfo(builder=HFModelBuilder, checkpoint="ibm-granite/granite-8b-code-base"),
+    'granite-8b-code-base-128k': ModelMetainfo(builder=HFModelBuilder, checkpoint="ibm-granite/granite-8b-code-base-128k"),
+    'granite-8b-code-instruct': ModelMetainfo(builder=HFModelBuilder, checkpoint="ibm-granite/granite-8b-code-instruct"),
+    'granite-8b-code-instruct-128k': ModelMetainfo(builder=HFModelBuilder, checkpoint="ibm-granite/granite-8b-code-instruct-128k"),
+    'granite-20b-code-base': ModelMetainfo(builder=HFModelBuilder, checkpoint="ibm-granite/granite-20b-code-base"),
+    'granite-20b-code-instruct': ModelMetainfo(builder=HFModelBuilder, checkpoint="ibm-granite/granite-20b-code-instruct"),
+    'granite-34b-code-base': ModelMetainfo(builder=HFModelBuilder, checkpoint="ibm-granite/granite-34b-code-base"),
+    'granite-34b-code-instruct': ModelMetainfo(builder=HFModelBuilder, checkpoint="ibm-granite/granite-34b-code-instruct"),
 }
