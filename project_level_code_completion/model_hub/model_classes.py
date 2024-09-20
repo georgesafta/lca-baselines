@@ -1,5 +1,6 @@
 import torch
 from transformers import AutoModelForCausalLM, BitsAndBytesConfig
+from vllm import LLM
 
 
 class ModelBuilderBase:
@@ -64,3 +65,15 @@ class HFModelBuilder4bit(HFModelBuilder):
             bnb_4bit_use_double_quant=True,
         )
         return q_config
+
+
+class VllmModelBuilder(ModelBuilderBase):
+    llm: LLM = None
+
+    @classmethod
+    def build_model(cls, checkpoint, **kwargs):
+        if not cls.llm:
+            cls.llm = LLM(model=checkpoint, **kwargs)
+            print("model is ready")
+
+        return cls.llm
