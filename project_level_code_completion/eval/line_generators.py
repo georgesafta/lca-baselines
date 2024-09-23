@@ -11,6 +11,7 @@ from evaluate import load
 from thefuzz import fuzz
 from tqdm.auto import tqdm
 from transformers import AutoTokenizer, StoppingCriteria, StoppingCriteriaList
+from vllm import LLM, SamplingParams
 
 from data_classes.datapoint_base import DatapointBase
 from data_classes.datapoint_commit_dataset import DatapointCommitDataset
@@ -55,9 +56,7 @@ class GenerationResults:
 
 
 class LineGeneratorBase:
-    def __init__(self, model, device, max_seq_len, results_path):
-        self.model = model
-        self.device = device
+    def __init__(self, max_seq_len, results_path):
         self.max_seq_len = max_seq_len
         self.results_path = results_path
         self.generation_results: Dict[str, GenerationResults] = dict()
@@ -132,7 +131,9 @@ class SpecificLineGenerator(LineGeneratorBase):
 
 class LineGeneratorHF(SpecificLineGenerator):
     def __init__(self, model, device, max_seq_len, results_path, tokenizer_path):
-        super().__init__(model, device, max_seq_len, results_path)
+        super().__init__(max_seq_len, results_path)
+        self.model = model
+        self.device = device
         self.tokenizer_path = tokenizer_path
         self._tokenizer: AutoTokenizer
         self._load_tokenizer()
@@ -232,6 +233,57 @@ class LineGeneratorHF(SpecificLineGenerator):
         return result
 
 
+class LineGeneratorVllm(SpecificLineGenerator):
+    def __init__(self, max_seq_len, results_path, llm: LLM):
+        super().__init__(max_seq_len, results_path)
+        self.llm = llm
+        self.sampling_params = SamplingParams(temperature=0,
+                                              stop=["\n"],
+                                              max_tokens=100,
+                                              truncate_prompt_tokens=self.max_seq_len,
+                                             )
+
+    def generate_line(self, datapoint: DatapointBase, use_zero_context: bool = False) -> dict[str, int]:
+        dict_of_lines = self.load_lines(datapoint)
+        for sc_name, list_of_lines in dict_of_lines.items():
+            self.generation_results[sc_name] = GenerationResults(list(), list())
+            for line_num in list_of_lines:
+                context, gt_line = self._get_context(datapoint, line_num)
+                if use_zero_context:
+                    context, gt_line = self._get_zero_context(datapoint, line_num)
+
+                out = self.llm.generate(context, sampling_params=self.sampling_params)[0]
+                prediction = out.outputs[0].text
+                prediction = prediction.strip("\n")
+                prediction_line = prediction.split("\n")[0]
+                self.save_results({'original_prediction': prediction, 'prediction_line': prediction_line, 'ground_truth': gt_line, 'line_class': sc_name, 'zero_context': use_zero_context, 'max_seq_len': self.max_seq_len})
+                self.generation_results[sc_name].append_result(prediction=prediction_line, gt=gt_line)
+
+        return {k: len(v) for k, v in dict_of_lines.items()}
+
+    def calculate_exact_match(self):
+        exact_match = load("exact_match")
+        results = dict()
+        for sc_name, gen_res in self.generation_results.items():
+            if len(gen_res.gt) > 0:
+                results[sc_name] = exact_match.compute(
+                    references=[item.strip() for item in gen_res.gt],
+                    predictions=[item.strip() for item in gen_res.prediction],
+                )
+        return results
+
+    def calculate_edit_similarity(self):
+        similarity = 0.
+        count = 0
+        result = dict()
+        for sc_name, gen_res in self.generation_results.items():
+            for pred, gt in zip(gen_res.prediction, gen_res.gt):
+                similarity += fuzz.ratio(pred, gt)
+                count += 1
+            if count > 0:
+                result[sc_name] = {'edit_similarity': similarity / count}
+        return result
+
 
 @torch.inference_mode()
 def evaluate_generation(args: GeneratorConfig):
@@ -329,6 +381,59 @@ def evaluate_generation(args: GeneratorConfig):
 
     # print(f'Final results for zero context: '
     #       f'EM {sum(em_list) / len(em_list):.2f}, ES {sum(es_list) / len(es_list):.2f}')
+
+
+def evaluate_vllm_generation(args: GeneratorConfig, llm: LLM, use_zero_context=False):
+    loaded_data = get_input_data(args.input_data_path)
+    if isinstance(loaded_data[0], dict):
+        input_data = [DatapointCommitDataset(**input_dict) for input_dict in loaded_data]
+    elif isinstance(loaded_data[0], DatapointCommitDataset):
+        input_data = loaded_data.copy()
+    else:
+        raise NotImplementedError
+
+    def calculate_metrics(use_zero_context=use_zero_context, args=args, input_data=input_data, llm=llm):
+        em_dict = dict()
+        es_dict = dict()
+        em_dict['all'] = list()
+        es_dict['all'] = list()
+        sc_counts = None
+        for datapoint in tqdm(input_data):
+            generator = LineGeneratorVllm(max_seq_len=args.seq_max_len, results_path=args.results_path, llm=llm)
+            el_counts = generator.generate_line(datapoint, use_zero_context=use_zero_context)
+            if sc_counts is None:
+                sc_counts = el_counts
+            else:
+                for k in el_counts.keys():
+                    sc_counts[k] += el_counts[k]
+            em = generator.calculate_exact_match()
+            es = generator.calculate_edit_similarity()
+            em_dict['all'].append(generator.aggregate_metric(em)['exact_match'])
+            es_dict['all'].append(generator.aggregate_metric(es)['edit_similarity'])
+            for sc_name in em.keys():
+                if sc_name not in em_dict:
+                    em_dict[sc_name] = list()
+                if sc_name not in es_dict:
+                    es_dict[sc_name] = list()
+
+                try:
+                    em_dict[sc_name].append(em[sc_name]['exact_match'])
+                except KeyError:
+                    pass
+                try:
+                    es_dict[sc_name].append(es[sc_name]['edit_similarity'])
+                except KeyError:
+                    pass
+        return em_dict, es_dict, sc_counts
+
+    em_dict, es_dict, _ = calculate_metrics()
+
+    return {
+            f'{args.composer}_em_list': em_dict,
+            f'{args.composer}_es_list': es_dict,
+            f'{args.composer}_em': {sc_name: sum(m_list) / len(m_list) for sc_name, m_list in em_dict.items()},
+            f'{args.composer}_es': {sc_name: sum(m_list) / len(m_list) for sc_name, m_list in es_dict.items()},
+        }
 
 
 if __name__ == '__main__':

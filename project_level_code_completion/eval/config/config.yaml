@@ -14,3 +14,5 @@ use_wandb: True
 do_generation: True
 seed: 42
 wandb_project_name_generation: 'LCA_project_code_completion'
+
+gpus: 1

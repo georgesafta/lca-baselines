@@ -10,14 +10,13 @@ import omegaconf
 import torch.cuda
 import wandb
 from omegaconf import DictConfig
-from transformers import AutoTokenizer
 
 from composers.composer_registry import COMPOSERS
 from eval.eval import evaluate
-from eval.line_generators import evaluate_generation
+from eval.line_generators import evaluate_generation, evaluate_vllm_generation
 from eval.preprocess import preprocess
 from model_hub.model_classes import VllmModelBuilder
-from model_hub.model_inference import inference, vllm_inference
+from model_hub.model_inference import inference
 from model_hub.model_registry import MODEL_REGISTRY
 
 
@@ -248,53 +247,79 @@ class VllmEvalPipeline(EvalPipeline):
     def __init__(self, config, composers=COMPOSERS):
         super().__init__(config=config, composers=composers)
         model_meta_info = MODEL_REGISTRY[self.inference_args.model]
-        self.llm = model_meta_info.builder.build_model(checkpoint=model_meta_info.checkpoint, trust_remote_code=True)
-        self.tokenizer = AutoTokenizer.from_pretrained(self.preprocess_args.tokenizer)
+        self.llm = model_meta_info.builder.build_model(checkpoint=model_meta_info.checkpoint,
+                                                       trust_remote_code=True,
+                                                       tensor_parallel_size=self.config.gpus,
+                                                       load_format="safetensors",
+                                                       gpu_memory_utilization=0.95,
+                                                      )
+        self.results = list()
 
     def run(self):
-        seed = self.config.seed
         # Run Zero context scenario
-        results = list()
-        result_0 = self.run_zero_context()
-        results.append(result_0)
-        if self.config.use_wandb:
-            wb_run = wandb.init(project=self.project_name, group=f"zero_context", name=f"zero_context")
-            wb_run.log(results[-1])
-            wb_run.finish()
-        print(results[-1])
+        self.run_zero_context()
+        prev_result = self.results[-1]
+        print({"em": prev_result["zero_em"], "es": prev_result["zero_es"], "composer": "zero"})
         print()
+
+        for composer in self.composers:
+            if composer == 'none':
+                continue
+            self.run_composer(composer)
+            prev_result = self.results[-1]
+            print({"em": prev_result["zero_em"], "es": prev_result["zero_es"], "composer": "zero"})
+            print()
+
+        with open(os.path.join(self.out_dir, 'generation_scores.json'), 'w') as f:
+            json.dump(self.results, f, indent=4)
+        print(f">>Generation Results are in {os.path.join(self.out_dir, 'generation_scores.json')}")
 
     def run_zero_context(self):
         self.inference_args.context_max = 0
-        self.eval_args.out_dir = os.path.join(self.out_dir, "context_0")
-        self._resolve_directories()
-
         print(">>Context 0 run")
 
         print('>>Preprocessing...')
         prepared_dataset_path = preprocess(self.preprocess_args, self.config.composers_config)
-
-        print(">>Model inference...")
         self.inference_args.input_data_path = prepared_dataset_path
-        lost_tokens = vllm_inference(llm=self.llm,
-                                     tokenizer=self.tokenizer,
-                                     data_path=prepared_dataset_path,
-                                     seq_max_len=self.inference_args.seq_max_len,
-                                     context_max=self.inference_args.context_max,
-                                     out_dir=self.inference_args.out_dir,
-                                    )
 
         print(">>Evaluation...")
-        #mean_ppl = evaluate(self.eval_args)
+        self.generator_config = GeneratorConfig(
+            input_data_path=self.inference_args.input_data_path,
+            seq_max_len=self.inference_args.seq_max_len - 100,
+            context_max=0,
+            model=self.inference_args.model,
+            device=self.eval_args.device,
+            best_perplexity=0,
+            tokenizer_path=self.preprocess_args.tokenizer,
+            composer="zero",
+            seed=self.config.seed,
+            results_path=os.path.join(self.out_dir, 'zero_generation_results.jsonl')
+        )
 
-        return {"context": 0, "composer": "zero", "dataset": self.dataset_name,
-                "model": self.inference_args.model} | lost_tokens
-    
-    def run(self):
-        pass
+        self.results.append(evaluate_vllm_generation(self.generator_config, self.llm, use_zero_context=True))
 
-    def __inference(self):
-        pass
+    def run_composer(self, composer):
+        self.preprocess_args.composers = composer
+        print(f'>>Preprocessing for {composer} composer...')
+        prepared_dataset_path = preprocess(self.preprocess_args, self.config.composers_config)
+        self.inference_args.input_data_path = prepared_dataset_path
+
+        print(">>Evaluation...")
+        self.generator_config = GeneratorConfig(
+            input_data_path=self.inference_args.input_data_path,
+            seq_max_len=self.inference_args.seq_max_len - 100,
+            context_max=0,
+            model=self.inference_args.model,
+            device=self.eval_args.device,
+            best_perplexity=0,
+            tokenizer_path=self.preprocess_args.tokenizer,
+            composer=composer,
+            seed=self.config.seed,
+            results_path=os.path.join(self.out_dir, f'{composer}_generation_results.jsonl')
+        )
+
+        self.results.append(evaluate_vllm_generation(self.generator_config, self.llm, use_zero_context=False))
+
 
 @hydra.main(config_path="config", config_name="config", version_base=None)
 def main(cfg: DictConfig) -> None:

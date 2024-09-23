@@ -6,7 +6,6 @@ from pathlib import Path
 import numpy as np
 import torch
 from tqdm.auto import tqdm
-from vllm import LLM, SamplingParams
 
 # from lca.code_generation.data_classes.datapoint_commit_dataset import DatapointCommitDataset
 from model_hub.model_registry import MODEL_REGISTRY
@@ -78,51 +77,6 @@ def model_inference(
                 logits[0].detach().cpu().to(torch.float32).numpy().astype(np.float16)[context_len:])
         np.save(os.path.join(curr_dir, 'context_tokens.npy'), input_ids[0].detach().cpu().numpy()[:context_len])
         np.save(os.path.join(curr_dir, 'completion_tokens.npy'), input_ids[0].detach().cpu().numpy()[context_len:])
-
-        ctxt_lens.append(context_len)
-        repo_ids.append(str(f"{datapoint['repo_id']}_{num_dp}"))
-
-    with open(os.path.join(out_dir, 'context_lengths.json'), 'w') as json_file:
-        json.dump(dict(zip(repo_ids, ctxt_lens)), json_file)
-    with open(os.path.join(out_dir, 'input_lengths.json'), 'w') as json_file:
-        json.dump(dict(zip(repo_ids, input_lens)), json_file)
-
-    return {'lost_tokens_num': sum(crop_lens), 'lost_tokens_mean': sum(crop_lens)/len(crop_lens), 'lost_tokens_ratio': sum(crop_lens)/sum(input_lens)}
-
-
-def vllm_inference(llm: LLM, tokenizer, data_path, seq_max_len, context_max, out_dir):
-    input_data = get_input_data(data_path)
-
-    sampling_params = SamplingParams(temperature=0, stop=["\n"], max_tokens=100)
-
-    ctxt_lens = list()
-    repo_ids = list()
-    crop_lens = list()
-    input_lens = list()
-
-    for num_dp, datapoint in enumerate(tqdm(input_data)):
-        completion_len = len(datapoint['model_input']) - datapoint['context_len']  # initial len of `completion`
-        if completion_len > seq_max_len / 4:
-            last_idx = datapoint['context_len'] + seq_max_len // 4
-            input_ids_cropped = datapoint['model_input'][:last_idx]
-            completion_len = len(input_ids_cropped) - datapoint['context_len']
-        else:
-            input_ids_cropped = datapoint['model_input'].copy()
-        input_ids_cropped = input_ids_cropped[-seq_max_len:]
-
-        datapoint['context_len'] = max(len(input_ids_cropped) - completion_len, 0)
-        context_len = datapoint['context_len']
-        if context_len > context_max:
-            thr = context_len - context_max
-            input_ids_cropped = input_ids_cropped[thr:]
-            context_len = context_max
-        crop_len = len(datapoint['model_input']) - len(input_ids_cropped)
-        crop_lens.append(crop_len)
-        input_lens.append(len(datapoint['model_input']))
-
-        prompt = tokenizer.decode(input_ids_cropped)
-        out = llm.generate(prompt, sampling_params=sampling_params)[0]
-        generated_text = out.outputs[0].text
 
         ctxt_lens.append(context_len)
         repo_ids.append(str(f"{datapoint['repo_id']}_{num_dp}"))
