@@ -329,7 +329,7 @@ def main(cfg: DictConfig) -> None:
 
     model_meta_info = MODEL_REGISTRY[inference_params["model"]]
 
-    if isinstance(model_meta_info.builder, VllmModelBuilder):
+    if model_meta_info.builder == VllmModelBuilder:
         pipeline = VllmEvalPipeline(cfg)
     else: 
         pipeline = EvalPipeline(cfg)#cfg.preprocess_params, cfg.inference_params, cfg.eval_params,
