@@ -270,12 +270,17 @@ class VllmEvalPipeline(EvalPipeline):
             print({"em": prev_result["zero_em"], "es": prev_result["zero_es"], "composer": "zero"})
             print()
 
+        inference_out_dir_path = Path(self.inference_args.out_dir)
+        if inference_out_dir_path.exists():
+            shutil.rmtree(inference_out_dir_path)
+
         with open(os.path.join(self.out_dir, 'generation_scores.json'), 'w') as f:
             json.dump(self.results, f, indent=4)
         print(f">>Generation Results are in {os.path.join(self.out_dir, 'generation_scores.json')}")
 
     def run_zero_context(self):
         self.inference_args.context_max = 0
+        self._resolve_directories()
         print(">>Context 0 run")
 
         print('>>Preprocessing...')
