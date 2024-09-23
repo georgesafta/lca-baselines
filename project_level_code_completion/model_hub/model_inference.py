@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import torch
 from tqdm.auto import tqdm
+from vllm import LLM, SamplingParams
 
 # from lca.code_generation.data_classes.datapoint_commit_dataset import DatapointCommitDataset
 from model_hub.model_registry import MODEL_REGISTRY
@@ -89,8 +90,10 @@ def model_inference(
     return {'lost_tokens_num': sum(crop_lens), 'lost_tokens_mean': sum(crop_lens)/len(crop_lens), 'lost_tokens_ratio': sum(crop_lens)/sum(input_lens)}
 
 
-def vllm_inference(llm, data_path, seq_max_len, context_max, out_dir,):
+def vllm_inference(llm: LLM, tokenizer, data_path, seq_max_len, context_max, out_dir):
     input_data = get_input_data(data_path)
+
+    sampling_params = SamplingParams(temperature=0, stop=["\n"], max_tokens=100)
 
     ctxt_lens = list()
     repo_ids = list()
@@ -111,14 +114,15 @@ def vllm_inference(llm, data_path, seq_max_len, context_max, out_dir,):
         context_len = datapoint['context_len']
         if context_len > context_max:
             thr = context_len - context_max
-            input_ids_cropped = input_ids_cropped[-seq_max_len:]
-            input_ids = input_ids[..., thr:]
+            input_ids_cropped = input_ids_cropped[thr:]
             context_len = context_max
-        crop_len = len(datapoint['model_input']) - input_ids.size(-1)
+        crop_len = len(datapoint['model_input']) - len(input_ids_cropped)
         crop_lens.append(crop_len)
         input_lens.append(len(datapoint['model_input']))
 
-        # TODO: generate
+        prompt = tokenizer.decode(input_ids_cropped)
+        out = llm.generate(prompt, sampling_params=sampling_params)[0]
+        generated_text = out.outputs[0].text
 
         ctxt_lens.append(context_len)
         repo_ids.append(str(f"{datapoint['repo_id']}_{num_dp}"))

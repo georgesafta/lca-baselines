@@ -10,13 +10,14 @@ import omegaconf
 import torch.cuda
 import wandb
 from omegaconf import DictConfig
+from transformers import AutoTokenizer
 
 from composers.composer_registry import COMPOSERS
 from eval.eval import evaluate
 from eval.line_generators import evaluate_generation
 from eval.preprocess import preprocess
 from model_hub.model_classes import VllmModelBuilder
-from model_hub.model_inference import inference
+from model_hub.model_inference import inference, vllm_inference
 from model_hub.model_registry import MODEL_REGISTRY
 
 
@@ -248,6 +249,7 @@ class VllmEvalPipeline(EvalPipeline):
         super().__init__(config=config, composers=composers)
         model_meta_info = MODEL_REGISTRY[self.inference_args.model]
         self.llm = model_meta_info.builder.build_model(checkpoint=model_meta_info.checkpoint, trust_remote_code=True)
+        self.tokenizer = AutoTokenizer.from_pretrained(self.preprocess_args.tokenizer)
 
     def run(self):
         seed = self.config.seed
@@ -274,12 +276,18 @@ class VllmEvalPipeline(EvalPipeline):
 
         print(">>Model inference...")
         self.inference_args.input_data_path = prepared_dataset_path
-        lost_tokens = inference(self.inference_args)
+        lost_tokens = vllm_inference(llm=self.llm,
+                                     tokenizer=self.tokenizer,
+                                     data_path=prepared_dataset_path,
+                                     seq_max_len=self.inference_args.seq_max_len,
+                                     context_max=self.inference_args.context_max,
+                                     out_dir=self.inference_args.out_dir,
+                                    )
 
         print(">>Evaluation...")
-        mean_ppl = evaluate(self.eval_args)
+        #mean_ppl = evaluate(self.eval_args)
 
-        return {"perplexity": mean_ppl, "context": 0, "composer": "zero", "dataset": self.dataset_name,
+        return {"context": 0, "composer": "zero", "dataset": self.dataset_name,
                 "model": self.inference_args.model} | lost_tokens
     
     def run(self):

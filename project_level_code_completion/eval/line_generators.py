@@ -236,7 +236,7 @@ class LineGeneratorHF(SpecificLineGenerator):
 @torch.inference_mode()
 def evaluate_generation(args: GeneratorConfig):
     set_seed(args.seed)
-    loaded_data = get_input_data(args)
+    loaded_data = get_input_data(args.input_data_path)
     if isinstance(loaded_data[0], dict):
         input_data = [DatapointCommitDataset(**input_dict) for input_dict in loaded_data]
     elif isinstance(loaded_data[0], DatapointCommitDataset):
