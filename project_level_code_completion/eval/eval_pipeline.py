@@ -15,6 +15,7 @@ from composers.composer_registry import COMPOSERS
 from eval.eval import evaluate
 from eval.line_generators import evaluate_generation
 from eval.preprocess import preprocess
+from model_hub.model_classes import VllmModelBuilder
 from model_hub.model_inference import inference
 from model_hub.model_registry import MODEL_REGISTRY
 
@@ -69,8 +70,6 @@ class EvalPipeline:
         eval_params = config.params.eval_params
         wandb_project_name = config.wandb_project_name
 
-        assert inference_params['model'] in MODEL_REGISTRY, (f'config: inference_params: model: '
-                                                             f'{inference_params["model"]} is not in MODEL_REGISTRY')
         if MODEL_REGISTRY[inference_params['model']].checkpoint != preprocess_params['tokenizer']:
             warnings.warn(f'Model and Tokenizer have different paths')
 
@@ -244,10 +243,65 @@ class EvalPipeline:
         return results
 
 
+class VllmEvalPipeline(EvalPipeline):
+    def __init__(self, config, composers=COMPOSERS):
+        super().__init__(config=config, composers=composers)
+        model_meta_info = MODEL_REGISTRY[self.inference_args.model]
+        self.llm = model_meta_info.builder.build_model(checkpoint=model_meta_info.checkpoint, trust_remote_code=True)
+
+    def run(self):
+        seed = self.config.seed
+        # Run Zero context scenario
+        results = list()
+        result_0 = self.run_zero_context()
+        results.append(result_0)
+        if self.config.use_wandb:
+            wb_run = wandb.init(project=self.project_name, group=f"zero_context", name=f"zero_context")
+            wb_run.log(results[-1])
+            wb_run.finish()
+        print(results[-1])
+        print()
+
+    def run_zero_context(self):
+        self.inference_args.context_max = 0
+        self.eval_args.out_dir = os.path.join(self.out_dir, "context_0")
+        self._resolve_directories()
+
+        print(">>Context 0 run")
+
+        print('>>Preprocessing...')
+        prepared_dataset_path = preprocess(self.preprocess_args, self.config.composers_config)
+
+        print(">>Model inference...")
+        self.inference_args.input_data_path = prepared_dataset_path
+        lost_tokens = inference(self.inference_args)
+
+        print(">>Evaluation...")
+        mean_ppl = evaluate(self.eval_args)
+
+        return {"perplexity": mean_ppl, "context": 0, "composer": "zero", "dataset": self.dataset_name,
+                "model": self.inference_args.model} | lost_tokens
+    
+    def run(self):
+        pass
+
+    def __inference(self):
+        pass
+
 @hydra.main(config_path="config", config_name="config", version_base=None)
 def main(cfg: DictConfig) -> None:
-    pipeline = EvalPipeline(cfg)#cfg.preprocess_params, cfg.inference_params, cfg.eval_params,
-                            # wandb_project_name=cfg.wandb_project_name)
+    inference_params = cfg.params.inference_params
+    assert inference_params["model"] in MODEL_REGISTRY, (f"config: inference_params: model: "
+                                                         f"{inference_params['model']} is not in MODEL_REGISTRY")
+
+    model_meta_info = MODEL_REGISTRY[inference_params["model"]]
+
+    if isinstance(model_meta_info.builder, VllmModelBuilder):
+        pipeline = VllmEvalPipeline(cfg)
+    else: 
+        pipeline = EvalPipeline(cfg)#cfg.preprocess_params, cfg.inference_params, cfg.eval_params,
+                                # wandb_project_name=cfg.wandb_project_name)
+
     results = pipeline.run()
     print()
     print(results)
