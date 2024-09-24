@@ -255,7 +255,7 @@ class LineGeneratorVllm(SpecificLineGenerator):
                 if str(context) == "":
                     # vLLM server crashes on empty prompt
                     context = "\n"
-                out = self.llm.generate(context, sampling_params=self.sampling_params)[0]
+                out = self.llm.generate(context, sampling_params=self.sampling_params, use_tqdm=False)[0]
                 prediction = out.outputs[0].text
                 prediction = prediction.strip("\n")
                 prediction_line = prediction.split("\n")[0]
