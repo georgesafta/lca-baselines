@@ -210,7 +210,7 @@ class LineGeneratorHF(SpecificLineGenerator):
         return self._tokenizer.batch_decode(generated_token_ids, skip_special_tokens=True)[0]
 
     def calculate_exact_match(self):
-        exact_match = load("exact_match")
+        exact_match = load("exact_match", module_type="metric")
         results = dict()
         for sc_name, gen_res in self.generation_results.items():
             if len(gen_res.gt) > 0:
@@ -264,7 +264,7 @@ class LineGeneratorVllm(SpecificLineGenerator):
         return {k: len(v) for k, v in dict_of_lines.items()}
 
     def calculate_exact_match(self):
-        exact_match = load("exact_match")
+        exact_match = load("exact_match", module_type="metric")
         results = dict()
         for sc_name, gen_res in self.generation_results.items():
             if len(gen_res.gt) > 0:
