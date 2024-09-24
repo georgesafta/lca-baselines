@@ -252,6 +252,9 @@ class LineGeneratorVllm(SpecificLineGenerator):
                 if use_zero_context:
                     context, gt_line = self._get_zero_context(datapoint, line_num)
 
+                if str(context) == "":
+                    # vLLM server crashes on empty prompt
+                    context = "\n"
                 out = self.llm.generate(context, sampling_params=self.sampling_params)[0]
                 prediction = out.outputs[0].text
                 prediction = prediction.strip("\n")
