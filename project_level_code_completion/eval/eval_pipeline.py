@@ -267,7 +267,7 @@ class VllmEvalPipeline(EvalPipeline):
                 continue
             self.run_composer(composer)
             prev_result = self.results[-1]
-            print({"em": prev_result["zero_em"], "es": prev_result["zero_es"], "composer": "zero"})
+            print({"em": prev_result[f"{composer}_em"], "es": prev_result[f"{composer}_es"], "composer": composer})
             print()
 
         inference_out_dir_path = Path(self.inference_args.out_dir)
