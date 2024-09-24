@@ -238,7 +238,6 @@ class LineGeneratorVllm(SpecificLineGenerator):
         super().__init__(max_seq_len, results_path)
         self.llm = llm
         self.sampling_params = SamplingParams(temperature=0,
-                                              stop=["\n"],
                                               max_tokens=100,
                                               truncate_prompt_tokens=self.max_seq_len,
                                              )
