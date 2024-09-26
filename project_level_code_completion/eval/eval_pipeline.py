@@ -278,6 +278,8 @@ class VllmEvalPipeline(EvalPipeline):
             json.dump(self.results, f, indent=4)
         print(f">>Generation Results are in {os.path.join(self.out_dir, 'generation_scores.json')}")
 
+        return [{"em": elem[f'{elem["composer"]}_em'], "es": elem[f'{elem["composer"]}_es'], "composer": elem["composer"]} for elem in self.results]
+
     def run_zero_context(self):
         self.inference_args.context_max = 0
         self._resolve_directories()
@@ -328,6 +330,10 @@ class VllmEvalPipeline(EvalPipeline):
 
 @hydra.main(config_path="config", config_name="config", version_base=None)
 def main(cfg: DictConfig) -> None:
+    if cfg.composers:
+        composers = {k:v for k, v in COMPOSERS.items() if k in cfg.composers}
+    else:
+        composers = COMPOSERS
     inference_params = cfg.params.inference_params
     assert inference_params["model"] in MODEL_REGISTRY, (f"config: inference_params: model: "
                                                          f"{inference_params['model']} is not in MODEL_REGISTRY")
@@ -335,9 +341,9 @@ def main(cfg: DictConfig) -> None:
     model_meta_info = MODEL_REGISTRY[inference_params["model"]]
 
     if model_meta_info.builder == VllmModelBuilder:
-        pipeline = VllmEvalPipeline(cfg)
+        pipeline = VllmEvalPipeline(cfg, composers=composers)
     else: 
-        pipeline = EvalPipeline(cfg)#cfg.preprocess_params, cfg.inference_params, cfg.eval_params,
+        pipeline = EvalPipeline(cfg, composers=composers)#cfg.preprocess_params, cfg.inference_params, cfg.eval_params,
                                 # wandb_project_name=cfg.wandb_project_name)
 
     results = pipeline.run()

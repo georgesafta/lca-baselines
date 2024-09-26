@@ -16,3 +16,4 @@ seed: 42
 wandb_project_name_generation: 'LCA_project_code_completion'
 
 gpus: 1
+composers: []

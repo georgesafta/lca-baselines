@@ -254,11 +254,17 @@ class LineGeneratorVllm(SpecificLineGenerator):
                 if str(context) == "":
                     # vLLM server crashes on empty prompt
                     context = "\n"
-                out = self.llm.generate(context, sampling_params=self.sampling_params, use_tqdm=False)[0]
-                prediction = out.outputs[0].text
+                outputs = self.llm.generate(context, sampling_params=self.sampling_params, use_tqdm=False)
+                if outputs:
+                    prediction = outputs[0].outputs[0].text
+                    has_failed = False
+                else:
+                    print("No inference output!")
+                    prediction = ""
+                    has_failed = True
                 prediction = prediction.strip("\n")
                 prediction_line = prediction.split("\n")[0]
-                self.save_results({'original_prediction': prediction, 'prediction_line': prediction_line, 'ground_truth': gt_line, 'line_class': sc_name, 'zero_context': use_zero_context, 'max_seq_len': self.max_seq_len})
+                self.save_results({'original_prediction': prediction, 'prediction_line': prediction_line, 'ground_truth': gt_line, 'line_class': sc_name, 'zero_context': use_zero_context, 'max_seq_len': self.max_seq_len, 'request_failed': has_failed})
                 self.generation_results[sc_name].append_result(prediction=prediction_line, gt=gt_line)
 
         return {k: len(v) for k, v in dict_of_lines.items()}
