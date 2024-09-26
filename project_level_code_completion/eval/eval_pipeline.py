@@ -252,6 +252,7 @@ class VllmEvalPipeline(EvalPipeline):
                                                        tensor_parallel_size=self.config.gpus,
                                                        load_format="safetensors",
                                                        gpu_memory_utilization=0.95,
+                                                       enable_chunked_prefill=False,
                                                       )
         self.results = list()
 
