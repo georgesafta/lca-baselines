@@ -257,10 +257,13 @@ class VllmEvalPipeline(EvalPipeline):
         self.results = list()
 
     def run(self):
+        outputs = list()
         # Run Zero context scenario
         self.run_zero_context()
         prev_result = self.results[-1]
-        print({"em": prev_result["zero_em"], "es": prev_result["zero_es"], "composer": "zero"})
+        output = {"em": prev_result["zero_em"], "es": prev_result["zero_es"], "composer": "zero"}
+        outputs.append(output)
+        print(output)
         print()
 
         for composer in self.composers:
@@ -268,7 +271,9 @@ class VllmEvalPipeline(EvalPipeline):
                 continue
             self.run_composer(composer)
             prev_result = self.results[-1]
-            print({"em": prev_result[f"{composer}_em"], "es": prev_result[f"{composer}_es"], "composer": composer})
+            output = {"em": prev_result[f"{composer}_em"], "es": prev_result[f"{composer}_es"], "composer": composer}
+            outputs.append(output)
+            print(output)
             print()
 
         inference_out_dir_path = Path(self.inference_args.out_dir)
@@ -279,7 +284,7 @@ class VllmEvalPipeline(EvalPipeline):
             json.dump(self.results, f, indent=4)
         print(f">>Generation Results are in {os.path.join(self.out_dir, 'generation_scores.json')}")
 
-        return [{"em": elem[f'{elem["composer"]}_em'], "es": elem[f'{elem["composer"]}_es'], "composer": elem["composer"]} for elem in self.results]
+        return outputs
 
     def run_zero_context(self):
         self.inference_args.context_max = 0
