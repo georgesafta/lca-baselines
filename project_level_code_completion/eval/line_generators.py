@@ -234,13 +234,15 @@ class LineGeneratorHF(SpecificLineGenerator):
 
 
 class LineGeneratorVllm(SpecificLineGenerator):
-    def __init__(self, max_seq_len, results_path, llm: LLM):
+    def __init__(self, max_seq_len, results_path, llm: LLM, tokenizer_path):
         super().__init__(max_seq_len, results_path)
         self.llm = llm
         self.sampling_params = SamplingParams(temperature=0,
                                               max_tokens=100,
-                                              truncate_prompt_tokens=self.max_seq_len,
                                              )
+        self.tokenizer_path = tokenizer_path
+        self._tokenizer: AutoTokenizer
+        self._load_tokenizer()
 
     def generate_line(self, datapoint: DatapointBase, use_zero_context: bool = False) -> dict[str, int]:
         dict_of_lines = self.load_lines(datapoint)
@@ -254,7 +256,9 @@ class LineGeneratorVllm(SpecificLineGenerator):
                 if str(context) == "":
                     # vLLM server crashes on empty prompt
                     context = "\n"
-                outputs = self.llm.generate(context, sampling_params=self.sampling_params, use_tqdm=False)
+
+                input_ids = self.tokenize(context)[..., -self.max_seq_len:]
+                outputs = self.llm.generate(prompt_token_ids=input_ids[0].tolist(), sampling_params=self.sampling_params, use_tqdm=False)
                 if outputs:
                     prediction = outputs[0].outputs[0].text
                     has_failed = False
@@ -291,6 +295,12 @@ class LineGeneratorVllm(SpecificLineGenerator):
             if count > 0:
                 result[sc_name] = {'edit_similarity': similarity / count}
         return result
+
+    def _load_tokenizer(self):
+        self._tokenizer = AutoTokenizer.from_pretrained(self.tokenizer_path)
+
+    def tokenize(self, text):
+        return self._tokenizer(text, return_tensors='pt', padding=False)['input_ids']
 
 
 @torch.inference_mode()
@@ -407,7 +417,7 @@ def evaluate_vllm_generation(args: GeneratorConfig, llm: LLM, use_zero_context=F
         es_dict['all'] = list()
         sc_counts = None
         for datapoint in tqdm(input_data):
-            generator = LineGeneratorVllm(max_seq_len=args.seq_max_len, results_path=args.results_path, llm=llm)
+            generator = LineGeneratorVllm(max_seq_len=args.seq_max_len, results_path=args.results_path, llm=llm, tokenizer_path=args.tokenizer_path)
             el_counts = generator.generate_line(datapoint, use_zero_context=use_zero_context)
             if sc_counts is None:
                 sc_counts = el_counts
